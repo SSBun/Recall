@@ -6,7 +6,7 @@
 
 Turn Markdown, PDF, and text files into a private, multilingual knowledge base you can search, question, and connect to other tools.
 
-[![Python 3.11–3.13](https://img.shields.io/badge/Python-3.11–3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python 3.11–3.13](https://img.shields.io/badge/Python-3.11--3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Local First](https://img.shields.io/badge/data-local--first-5E6AD2)](#local-first-by-design)
 [![OpenAPI](https://img.shields.io/badge/API-OpenAPI-6BA539?logo=openapiinitiative&logoColor=white)](./docs/GUIDE.md#http-api)

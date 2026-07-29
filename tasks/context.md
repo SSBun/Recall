@@ -1,5 +1,9 @@
 # 工作区上下文
 
+## 公开文档与仓库
+
+- 公开 GitHub 仓库为 `https://github.com/SSBun/Recall`，默认分支为 `main`；`README.md`/`README.zh-CN.md` 分别是英文/中文项目首页，`docs/GUIDE.md`/`docs/GUIDE.zh-CN.md` 分别是英文/中文完整使用指南——公开能力、安装方式或文档结构变化时必须同步更新两种语言；权威来源：GitHub 仓库与上述文档。
+
 ## 系统边界
 
 - 每个 daemon 进程在同一进程内同时提供 Unix socket 和仅绑定 `127.0.0.1` 的 HTTP API（FastAPI/Uvicorn），动态分配端口；两种 transport 共享同一个 `RecallApp` 和同一把执行锁（包住 Unix 临时 `os.environ` 替换和所有 HTTP/Unix 对 RecallApp 的访问）；HTTP 活动、stop、SIGTERM 和 idle timeout 同时清理两种 transport；`daemon status` 返回 `api_url`——权威来源：[src/recall/daemon.py](../src/recall/daemon.py)、[src/recall/http_app.py](../src/recall/http_app.py)、[src/recall/api_token.py](../src/recall/api_token.py) 与 [src/recall/auth_session.py](../src/recall/auth_session.py)，进程、transport、认证或 store 边界变化时复核。
