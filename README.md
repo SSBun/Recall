@@ -99,7 +99,78 @@ uv run recall daemon status --store /path/to/db
 uv run recall daemon stop --store /path/to/db
 ```
 
-运行文件位于 `~/.local/state/recall/daemons/`，目录和 socket 权限分别为 `0700` 与 `0600`。`provider login/list/logout` 不启动 daemon。daemon 仅支持本机 Unix socket，不提供 TCP/HTTP 或远程访问。
+运行文件位于 `~/.local/state/recall/daemons/`，目录和 socket 权限分别为 `0700` 与 `0600`。`provider login/list/logout` 不启动 daemon。
+
+### HTTP API 与 Web Dashboard
+
+每个 daemon 进程在启动 Unix socket 的同时，也在同一进程内启动一个仅绑定 `127.0.0.1` 的 HTTP API（FastAPI/Uvicorn），动态分配端口。HTTP 和 Unix 操作共享同一个 `RecallApp`、同一把执行锁，HTTP 活动会刷新 30 分钟 idle timer。
+
+`daemon status` 返回当前 store 的 `api_url`：
+
+```bash
+uv run recall daemon status --json
+# {"version":1,"ok":true,"data":{"store":"...","status":"running","pid":12345,"api_url":"http://127.0.0.1:54321"}}
+```
+
+所有 `/v1/*` 端点要求 `Authorization: Bearer <token>`，Token 全局保存在 `~/.config/recall/api-token`（`0600` 权限，`0700` 父目录），首次自动生成后复用。API 不启用 CORS，校验 Host 和 Origin，不提供无认证模式。
+
+OpenAPI 文档位于 `/openapi.json`。Dashboard 页面通过同源根文档内联的 escaped `<meta>` 值读取 API base 和 Bearer Token；Token 不进入 URL、query、history、日志、错误 body 或公开脚本资源。
+
+端点包括：
+
+- `GET /v1/health`、`GET /v1/models`
+- `GET /v1/documents`、`GET /v1/documents/{id}`、`POST /v1/documents/index`、`POST /v1/documents/remove`、`POST /v1/documents/retag`
+- `POST /v1/search`、`POST /v1/ask`
+- `GET /v1/config`、`PATCH /v1/config`
+- `GET /v1/providers`、`POST /v1/providers/{id}/login`、`DELETE /v1/providers/{id}`
+- `GET /v1/auth-sessions/{id}`、`POST /v1/auth-sessions/{id}/code`、`DELETE /v1/auth-sessions/{id}`
+- `GET /v1/daemon`、`POST /v1/daemon/stop`
+
+批量部分失败返回 HTTP `207`，body 使用 `PARTIAL_FAILURE` envelope。
+
+#### Web Dashboard
+
+```bash
+# 自动启动 daemon 并打开同源 Dashboard
+uv run recall dashboard
+
+# 指定 store
+uv run recall dashboard --store /path/to/db
+
+# JSON 模式只返回 URL，不打开浏览器
+uv run recall dashboard --json
+```
+
+Dashboard 提供 Search、Ask 和命中 chunk/metadata 预览，使用 Linear dark 风格，不加载外部资源。只通过 `textContent`/`createTextNode` 渲染不可信内容，不使用 `innerHTML`。
+
+#### 异步 Provider OAuth 会话
+
+通过 HTTP API 可完成异步 OAuth 登录，支持 browser 和 device_code 流程：
+
+```bash
+curl -X POST http://127.0.0.1:<port>/v1/providers/openai-codex/login \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"browser"}'
+
+# 轮询会话状态
+curl http://127.0.0.1:<port>/v1/auth-sessions/<session_id> \
+  -H "Authorization: Bearer <token>"
+
+# 提交手动授权码
+curl -X POST http://127.0.0.1:<port>/v1/auth-sessions/<session_id>/code \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"code":"..."}'
+
+# 取消会话
+curl -X DELETE http://127.0.0.1:<port>/v1/auth-sessions/<session_id> \
+  -H "Authorization: Bearer <token>"
+```
+
+同步 `recall provider login` 继续使用原有终端交互流程，不受影响。daemon 退出时会取消所有进行中的 OAuth 会话；本地取消可靠终止 bridge，provider 侧流程自然过期。
+
+后续 MCP Server 通过稳定的 HTTP/OpenAPI 契约接入，不需要实现额外的传输层。
 
 ## 配置文件
 

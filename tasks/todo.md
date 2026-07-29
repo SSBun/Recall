@@ -1,5 +1,6 @@
 # 任务索引
 
+- 实现标准 HTTP API 与 Web Dashboard — Status (2026-07-29 16:27): Completed — [任务记录](todo/implement-http-api-dashboard.md)
 - 按关注点整理本地 Git 提交 — Status (2026-07-29 10:58): Completed — [任务记录](todo/commit-local-changes.md)
 - 添加配置命令与交互式配置向导 — Status (2026-07-29 09:23): Completed — [任务记录](todo/add-config-command.md)
 - 切换 Qwen3 Embedding 并重建数据库 — Completed (2026-07-28 22:55) — [任务记录](todo/migrate-qwen3-embedding.md)
