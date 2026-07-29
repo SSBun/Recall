@@ -16,6 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .api_token import get_or_create_token
+from .http_app import RuntimeSeam, build_http_app
+
 PROTOCOL_VERSION = 1
 IDLE_TIMEOUT_SECONDS = 30 * 60
 START_TIMEOUT_SECONDS = 10
@@ -90,6 +93,18 @@ class DaemonClient:
             )
         except _ConnectError:
             return {"store": str(self.store), "status": "stopped"}
+
+    def ensure_running(self) -> dict[str, Any]:
+        """Idempotently ensure the daemon is running, auto-starting if needed."""
+        try:
+            return _response_data(
+                self._send({"version": PROTOCOL_VERSION, "operation": "status"})
+            )
+        except _ConnectError:
+            self._start()
+            return _response_data(
+                self._send({"version": PROTOCOL_VERSION, "operation": "status"})
+            )
 
     def stop(self) -> dict[str, Any]:
         try:
@@ -176,10 +191,17 @@ class DaemonClient:
 
 
 class _RecallServer(socketserver.UnixStreamServer):
-    def __init__(self, socket_path: Path, store: Path, app: Any) -> None:
+    def __init__(
+        self,
+        socket_path: Path,
+        store: Path,
+        seam: RuntimeSeam,
+        api_url: str,
+    ) -> None:
         self.store = store
-        self.app = app
-        self.last_activity = time.monotonic()
+        self.seam = seam
+        self.app = seam.app
+        self.api_url = api_url
         self.stopping = False
         super().__init__(str(socket_path), _RequestHandler)
 
@@ -191,6 +213,7 @@ class _RecallServer(socketserver.UnixStreamServer):
                     "store": str(self.store),
                     "status": "running",
                     "pid": os.getpid(),
+                    "api_url": self.api_url,
                 }
             )
         if operation == "stop":
@@ -212,17 +235,10 @@ class _RecallServer(socketserver.UnixStreamServer):
         return self._run(argv, environment)
 
     def _run(self, argv: list[str], environment: dict[str, str]) -> dict[str, Any]:
-        from .cli import run
-
         stdout = io.StringIO()
-        with _request_environment(environment):
-            run(
-                [*argv, "--store", str(self.store), "--json"],
-                app_factory=lambda _store: self.app,
-                use_daemon=False,
-                stdout=stdout,
-                stderr=io.StringIO(),
-            )
+        # The shared lock must cover the entire os.environ replacement boundary
+        # so HTTP threads never observe a Unix caller's temporary environment.
+        self.seam.execute_locked(lambda: self._run_with_env(argv, environment, stdout))
         try:
             response = json.loads(stdout.getvalue())
         except json.JSONDecodeError:
@@ -230,6 +246,23 @@ class _RecallServer(socketserver.UnixStreamServer):
         return response if isinstance(response, dict) else _failure(
             "DAEMON_ERROR", "daemon 内部命令响应无效"
         )
+
+    def _run_with_env(
+        self, argv: list[str], environment: dict[str, str], stdout: io.StringIO
+    ) -> None:
+        with _request_environment(environment):
+            from .cli import run
+
+            try:
+                run(
+                    [*argv, "--store", str(self.store), "--json"],
+                    app_factory=lambda _store: self.app,
+                    use_daemon=False,
+                    stdout=stdout,
+                    stderr=io.StringIO(),
+                )
+            except SystemExit:
+                pass
 
 
 class _RequestHandler(socketserver.StreamRequestHandler):
@@ -251,7 +284,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         self.wfile.write(
             (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
         )
-        self.server.last_activity = time.monotonic()  # type: ignore[attr-defined]
+        self.server.seam.touch()  # type: ignore[attr-defined]
 
 
 def serve(
@@ -260,6 +293,7 @@ def serve(
     runtime_root: Path | None = None,
     idle_timeout: float = IDLE_TIMEOUT_SECONDS,
     app_factory: Callable[[Path], Any] | None = None,
+    enable_http: bool = True,
 ) -> int:
     store = store.expanduser().resolve()
     root = (runtime_root or default_runtime_root()).expanduser().resolve()
@@ -282,24 +316,101 @@ def serve(
 
             app_factory = _create_app
         app = app_factory(store)
-        server = _RecallServer(paths.socket, store, app)
+
+        # Build runtime seam (shared lock, activity clock, stop callback)
+        from .auth_session import OAuthSessionManager
+
+        session_manager = (
+            OAuthSessionManager(on_activity=lambda: seam.touch()) if enable_http else None
+        )
+        seam = RuntimeSeam(
+            app,
+            store,
+            pi_client=app.pi if hasattr(app, "pi") else None,
+            session_manager=session_manager,
+        )
+
+        # Pre-bind dynamic loopback TCP port for HTTP
+        http_socket: socket.socket | None = None
+        api_url = ""
+        uvicorn_server: Any = None
+        http_thread: threading.Thread | None = None
+
+        if enable_http:
+            http_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            http_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            http_socket.bind(("127.0.0.1", 0))
+            http_port = http_socket.getsockname()[1]
+            api_url = f"http://127.0.0.1:{http_port}"
+            token = get_or_create_token()
+            http_app = build_http_app(seam, token=token, api_url=api_url)
+
+            import uvicorn
+
+            config = uvicorn.Config(
+                app=http_app,
+                host="127.0.0.1",
+                port=http_port,
+                log_level="warning",
+            )
+            uvicorn_server = uvicorn.Server(config)
+            http_thread = threading.Thread(
+                target=uvicorn_server.run,
+                kwargs={"sockets": [http_socket]},
+                daemon=True,
+            )
+            http_thread.start()
+            deadline = time.monotonic() + START_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                if uvicorn_server.started:
+                    break
+                if not http_thread.is_alive():
+                    break
+                time.sleep(0.02)
+            if not uvicorn_server.started:
+                uvicorn_server.should_exit = True
+                http_thread.join(timeout=1)
+                http_socket.close()
+                raise DaemonError("HTTP API 启动失败或超时")
+
+        server = _RecallServer(paths.socket, store, seam, api_url)
         os.chmod(paths.socket, 0o600)
         _write_pid(paths.pid, store)
         server.timeout = min(0.25, max(idle_timeout, 0.01))
+
+        def _trigger_stop() -> None:
+            server.stopping = True
+            if uvicorn_server:
+                uvicorn_server.should_exit = True
+
+        seam.set_stop_callback(_trigger_stop)
 
         previous_handler: Any = None
         if threading.current_thread() is threading.main_thread():
             previous_handler = signal.signal(
                 signal.SIGTERM,
-                lambda _signum, _frame: setattr(server, "stopping", True),
+                lambda _signum, _frame: _trigger_stop(),
             )
         try:
-            while (
-                not server.stopping
-                and time.monotonic() - server.last_activity < idle_timeout
-            ):
+            while not server.stopping:
+                if time.monotonic() - seam.last_activity >= idle_timeout:
+                    break
+                if session_manager:
+                    session_manager.expire_stale()
+                if http_thread and not http_thread.is_alive():
+                    break
                 server.handle_request()
         finally:
+            _trigger_stop()
+            if session_manager:
+                session_manager.cleanup_all()
+            if http_thread:
+                http_thread.join(timeout=3)
+            if http_socket:
+                try:
+                    http_socket.close()
+                except Exception:  # noqa: S110, BLE001
+                    pass
             if previous_handler is not None:
                 signal.signal(signal.SIGTERM, previous_handler)
             server.server_close()

@@ -247,6 +247,8 @@ class RecallApp:
                 "document_id": hit["document_id"],
                 "chunk_id": hit["chunk_id"],
                 "path": hit["path"],
+                "content": hit["content"],
+                "metadata": hit["metadata"],
             }
             for index, hit in enumerate(hits, start=1)
         ]

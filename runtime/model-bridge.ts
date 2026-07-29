@@ -45,6 +45,13 @@ interface BridgeFailure {
 }
 
 export type BridgeResponse = BridgeSuccess | DataSuccess | BridgeFailure;
+export type LoginSessionEvent = Record<string, unknown>;
+
+export interface LoginSessionController {
+  controller: AbortController;
+  interaction: AuthInteraction;
+  handleLine(line: string): void;
+}
 
 export async function listAvailableModelReferences(models: Models): Promise<string[]> {
   await models.refresh();
@@ -85,6 +92,99 @@ export async function completeWithModels(
     throw new Error("模型未返回文本");
   }
   return { version: 1, ok: true, text };
+}
+
+export function createLoginSessionController(
+  method: string,
+  emit: (event: LoginSessionEvent) => void = emitEvent,
+): LoginSessionController {
+  const controller = new AbortController();
+  let methodAnswered = false;
+  let resolveCode: ((code: string) => void) | null = null;
+  let pendingCode = nextCodePromise();
+
+  function nextCodePromise(): Promise<string> {
+    return new Promise<string>((resolve) => {
+      resolveCode = resolve;
+    });
+  }
+
+  function resolvePendingCode(code: string): void {
+    const callback = resolveCode;
+    resolveCode = null;
+    if (callback) {
+      callback(code);
+    }
+  }
+
+  async function prompt(promptInput: AuthPrompt): Promise<string> {
+    if (!methodAnswered && promptInput.type === "select") {
+      methodAnswered = true;
+      return selectMethod(promptInput, method);
+    }
+    if (
+      promptInput.type === "text" ||
+      promptInput.type === "secret" ||
+      promptInput.type === "manual_code"
+    ) {
+      emit({ type: "waiting", prompt: promptInput.message });
+      const code = await pendingCode;
+      pendingCode = nextCodePromise();
+      if (controller.signal.aborted) {
+        throw new Error("cancelled");
+      }
+      return code;
+    }
+    throw new Error(`unexpected prompt type: ${promptInput.type}`);
+  }
+
+  function notify(event: AuthEvent): void {
+    if (event.type === "auth_url") {
+      emit({
+        type: "auth_url",
+        url: event.url,
+        instructions: event.instructions ?? undefined,
+      });
+      return;
+    }
+    if (event.type === "device_code") {
+      emit({
+        type: "device_code",
+        verification_uri: event.verificationUri,
+        user_code: event.userCode,
+        interval_seconds: event.intervalSeconds ?? undefined,
+        expires_in_seconds: event.expiresInSeconds ?? undefined,
+      });
+      return;
+    }
+    emit({ type: event.type, message: event.message });
+  }
+
+  function handleLine(line: string): void {
+    try {
+      const payload = JSON.parse(line) as { type?: string; cancel?: boolean; code?: unknown };
+      if (payload.cancel || payload.type === "cancel") {
+        controller.abort();
+        resolvePendingCode("");
+        return;
+      }
+      if ((payload.type === "code" || payload.code !== undefined) && typeof payload.code === "string") {
+        resolvePendingCode(payload.code);
+      }
+    } catch {
+      // ignore invalid control lines
+    }
+  }
+
+  return {
+    controller,
+    interaction: {
+      signal: controller.signal,
+      prompt,
+      notify,
+    },
+    handleLine,
+  };
 }
 
 async function completeCommand(): Promise<BridgeSuccess> {
@@ -157,6 +257,83 @@ async function modelCommand(args: string[]): Promise<DataSuccess> {
   };
 }
 
+async function loginSessionCommand(args: string[]): Promise<void> {
+  const [providerId, authPath, method] = args;
+  if (!providerId || !authPath || !method) {
+    emitEvent({ type: "error", message: "usage: provider login-session <provider> <authPath> <method>" });
+    process.exitCode = 1;
+    return;
+  }
+  if (method !== "browser" && method !== "device_code") {
+    emitEvent({ type: "error", message: `method 只能是 browser 或 device_code: ${method}` });
+    process.exitCode = 1;
+    return;
+  }
+  if (providerId !== "openai-codex") {
+    emitEvent({ type: "error", message: "当前仅支持 openai-codex OAuth 登录" });
+    process.exitCode = 1;
+    return;
+  }
+
+  const credentials = new FileCredentialStore(authPath);
+  const models = builtinModels({ credentials });
+  const session = createLoginSessionController(method);
+  const readline = createInterface({ input: process.stdin });
+  const closeReadline = () => {
+    try {
+      readline.close();
+    } catch {
+      // ignored
+    }
+  };
+  session.controller.signal.addEventListener("abort", closeReadline, { once: true });
+  readline.on("line", session.handleLine);
+
+  try {
+    await models.login(providerId, "oauth", session.interaction);
+    emitEvent({ type: "completed" });
+  } catch (error) {
+    if (isCancelError(error) || session.controller.signal.aborted) {
+      emitEvent({ type: "cancelled" });
+      return;
+    }
+    emitEvent({ type: "error", message: errorMessage(error) });
+    process.exitCode = 1;
+  } finally {
+    closeReadline();
+  }
+}
+
+function selectMethod(prompt: Extract<AuthPrompt, { type: "select" }>, method: string): string {
+  const normalizedMethod = method === "device_code" ? "device-code" : method;
+  const selected = prompt.options.find((option) => {
+    const optionId = option.id.toLowerCase();
+    const optionLabel = option.label.toLowerCase();
+    return (
+      optionId === method ||
+      optionId === normalizedMethod ||
+      optionLabel.includes(method.replace("_", " ")) ||
+      optionLabel.includes(normalizedMethod.replace("-", " "))
+    );
+  });
+  if (!selected) {
+    throw new Error(`OAuth method not available: ${method}`);
+  }
+  return selected.id;
+}
+
+function emitEvent(event: LoginSessionEvent): void {
+  process.stdout.write(JSON.stringify(event) + "\n");
+}
+
+function isCancelError(error: unknown): boolean {
+  return error instanceof Error && (error.message === "cancelled" || error.name === "AbortError");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function terminalInteraction(readline: Interface): AuthInteraction {
   return {
     prompt: (prompt) => answerPrompt(readline, prompt),
@@ -189,7 +366,9 @@ async function answerPrompt(readline: Interface, prompt: AuthPrompt): Promise<st
 function notifyAuthEvent(event: AuthEvent): void {
   if (event.type === "auth_url") {
     printError(`\n请在浏览器中打开：\n${event.url}`);
-    if (event.instructions) printError(event.instructions);
+    if (event.instructions) {
+      printError(event.instructions);
+    }
     return;
   }
   if (event.type === "device_code") {
@@ -212,21 +391,26 @@ function printError(message: string): void {
 async function main(): Promise<void> {
   try {
     const command = process.argv[2];
+    if (command === "provider") {
+      const action = process.argv[3];
+      if (action === "login-session") {
+        await loginSessionCommand(process.argv.slice(4));
+        return;
+      }
+      const response = await providerCommand(process.argv.slice(3));
+      process.stdout.write(JSON.stringify(response));
+      return;
+    }
     const response =
-      command === "provider"
-        ? await providerCommand(process.argv.slice(3))
-        : command === "model"
-          ? await modelCommand(process.argv.slice(3))
-          : await completeCommand();
+      command === "model"
+        ? await modelCommand(process.argv.slice(3))
+        : await completeCommand();
     process.stdout.write(JSON.stringify(response));
   } catch (error) {
     const response: BridgeFailure = {
       version: 1,
       ok: false,
-      error: {
-        code: "MODEL_ERROR",
-        message: error instanceof Error ? error.message : String(error),
-      },
+      error: { code: "MODEL_ERROR", message: errorMessage(error) },
     };
     process.stdout.write(JSON.stringify(response));
     process.exitCode = 1;

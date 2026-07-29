@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recall Dashboard</title>
+  <!-- RECALL_DASHBOARD_BOOTSTRAP -->
+  <link rel="stylesheet" href="/dashboard/app.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Recall</h1>
+      <nav role="tablist" aria-label="Recall tools">
+        <button id="tab-search" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-search">Search</button>
+        <button id="tab-ask" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-ask">Ask</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="panel-search" class="panel active" role="tabpanel" aria-labelledby="tab-search">
+        <form id="search-form">
+          <input id="search-query" type="text" placeholder="Search your knowledge base…" autocomplete="off" aria-label="Search query">
+          <div class="filters">
+            <label>Limit <input id="search-limit" type="number" min="1" max="50" value="5"></label>
+            <label>Category <input id="search-category" type="text" placeholder="optional" autocomplete="off"></label>
+            <label>Tag <input id="search-tag" type="text" placeholder="optional" autocomplete="off"></label>
+          </div>
+          <button type="submit">Search</button>
+        </form>
+      </section>
+
+      <section id="panel-ask" class="panel" role="tabpanel" aria-labelledby="tab-ask">
+        <form id="ask-form">
+          <textarea id="ask-question" placeholder="Ask a question about your knowledge base…" rows="3" aria-label="Question"></textarea>
+          <div class="filters">
+            <label>Limit <input id="ask-limit" type="number" min="1" max="50" value="5"></label>
+            <label>Model
+              <input id="ask-model" type="text" list="ask-model-options" placeholder="default" autocomplete="off">
+              <datalist id="ask-model-options"></datalist>
+            </label>
+            <label class="checkbox-label">
+              <input id="ask-allow-general-knowledge" type="checkbox">
+              Allow general knowledge
+            </label>
+          </div>
+          <button type="submit">Ask</button>
+        </form>
+      </section>
+
+      <div id="status" role="status" aria-live="polite"></div>
+      <div id="results"></div>
+    </main>
+  </div>
+  <script src="/dashboard/app.js"></script>
+</body>
+</html>

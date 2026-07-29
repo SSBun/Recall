@@ -117,6 +117,12 @@ def build_parser() -> argparse.ArgumentParser:
         daemon_command.add_argument("--store")
         daemon_command.add_argument("--json", action="store_true")
 
+    dashboard = subparsers.add_parser(
+        "dashboard", help="Open the web dashboard for a store"
+    )
+    dashboard.add_argument("--store")
+    dashboard.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -130,6 +136,7 @@ def run(
     config_prompt_runner: Callable[[Path, TextIO, TextIO], int] | None = None,
     config_path: Path = DEFAULT_CONFIG_PATH,
     use_daemon: bool = True,
+    browser_opener: Callable[[str], None] | None = None,
     stdin: TextIO = sys.stdin,
     stdout: TextIO = sys.stdout,
     stderr: TextIO = sys.stderr,
@@ -155,6 +162,11 @@ def run(
             data = _dispatch_daemon(
                 (daemon_factory or _create_daemon_client)(store_path), args
             )
+        elif args.command == "dashboard":
+            store_path = resolve_store(args.store)
+            data = _dispatch_dashboard(
+                (daemon_factory or _create_daemon_client)(store_path), args
+            )
         else:
             store_path = resolve_store(args.store)
             if use_daemon and app_factory is None:
@@ -176,6 +188,8 @@ def run(
             _emit_answer(data, stdout)
         elif args.command == "daemon" and not json_mode:
             _emit_daemon_status(data, stdout)
+        elif args.command == "dashboard" and not json_mode:
+            _emit_dashboard(data, stdout, browser_opener)
         elif args.command == "config" and not json_mode:
             _emit_config_settings(data, stdout)
         else:
@@ -337,6 +351,18 @@ def _dispatch_daemon(client: Any, args: argparse.Namespace) -> dict[str, object]
     raise RecallError("USAGE_ERROR", f"未知 daemon 命令: {args.daemon_command}")
 
 
+def _dispatch_dashboard(client: Any, args: argparse.Namespace) -> dict[str, object]:
+    # Ensure daemon is running (auto-start if needed)
+    status = client.ensure_running()
+    api_url = status.get("api_url", "")
+    dashboard_url = api_url + "/" if api_url else ""
+    return {
+        "store": str(status.get("store", "")),
+        "dashboard_url": dashboard_url,
+        "api_url": api_url,
+    }
+
+
 def _emit_provider_statuses(data: dict[str, Any], stdout: TextIO) -> None:
     from .provider_prompt import PROVIDER_OPTIONS
 
@@ -358,6 +384,22 @@ def _emit_daemon_status(data: dict[str, Any], stdout: TextIO) -> None:
     status = "运行中" if data["status"] == "running" else "已停止"
     pid = f" (PID {data['pid']})" if "pid" in data else ""
     print(f"{data['store']}: {status}{pid}", file=stdout)
+
+
+def _emit_dashboard(
+    data: dict[str, Any], stdout: TextIO, browser_opener: Callable[[str], None] | None
+) -> None:
+    url = data.get("dashboard_url") or data.get("api_url", "")
+    if url:
+        opener = browser_opener
+        if opener is None:
+            import webbrowser
+
+            opener = webbrowser.open
+        opener(url)
+        print(f"Dashboard: {url}", file=stdout)
+    else:
+        print("Dashboard unavailable: daemon has no API URL", file=stdout)
 
 
 def _emit_config_settings(data: dict[str, Any], stdout: TextIO) -> None:
