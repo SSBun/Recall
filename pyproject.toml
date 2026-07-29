@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recall-rag"
+version = "0.1.0"
+description = "本地个人知识库 RAG CLI"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "chromadb>=1.5.9,<2",
+  "cmd2>=4.1.2,<5",
+  "numpy>=1.24",
+  "pypdf>=6.14.2,<7",
+  "sentence-transformers>=5.6.1,<6",
+]
+
+[project.scripts]
+recall = "recall.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+recall = ["model_bridge.mjs"]

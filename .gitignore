@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Node.js
+node_modules/
+
+# Local knowledge and vector data
+data/
+db/
+
+# Secrets and local settings
+.env
+.env.*
+
+# macOS
+.DS_Store
