@@ -2,7 +2,7 @@
 
 ## 公开文档与仓库
 
-- 公开 GitHub 仓库为 `https://github.com/SSBun/Recall`，默认分支为 `main`；`README.md`/`README.zh-CN.md` 分别是英文/中文项目首页，`docs/GUIDE.md`/`docs/GUIDE.zh-CN.md` 分别是英文/中文完整使用指南——公开能力、安装方式或文档结构变化时必须同步更新两种语言；权威来源：GitHub 仓库与上述文档。
+- 公开 GitHub 仓库为 `https://github.com/SSBun/Recall`，默认分支为 `main`，项目以 MIT License 发布；`README.md`/`README.zh-CN.md` 分别是英文/中文项目首页，`docs/GUIDE.md`/`docs/GUIDE.zh-CN.md` 分别是英文/中文完整使用指南——公开能力、安装方式、许可证或文档结构变化时必须同步更新项目元数据和两种语言；权威来源：GitHub 仓库、`LICENSE`、`pyproject.toml` 与上述文档。
 
 ## 系统边界
 
