@@ -10,6 +10,7 @@ Turn Markdown, PDF, and text files into a private, multilingual knowledge base y
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Local First](https://img.shields.io/badge/data-local--first-5E6AD2)](#local-first-by-design)
 [![OpenAPI](https://img.shields.io/badge/API-OpenAPI-6BA539?logo=openapiinitiative&logoColor=white)](./docs/GUIDE.md#http-api)
+[![MIT License](https://img.shields.io/badge/license-MIT-F5C518)](./LICENSE)
 
 [English](./README.md) · [简体中文](./README.zh-CN.md) · [Guide](./docs/GUIDE.md) · [中文指南](./docs/GUIDE.zh-CN.md)
 
@@ -137,3 +138,7 @@ When automatic tagging, retagging, or answering uses a hosted model, the require
 Recall is an early-stage project currently installed from source. The data model and machine envelopes are versioned, but public package distribution and a stable-API guarantee have not been announced yet.
 
 If Recall is useful to you, star the repository and share what you want your personal knowledge system to remember next.
+
+## License
+
+Recall is released under the [MIT License](./LICENSE).

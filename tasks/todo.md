@@ -1,6 +1,6 @@
 # 任务索引
 
-- 优化公开文档并创建公开仓库 — Status (2026-07-29 18:18): Completed — [任务记录](todo/polish-public-docs-brand.md)
+- 优化公开文档并创建公开仓库 — Status (2026-07-29 18:38): In Progress — [任务记录](todo/polish-public-docs-brand.md)
 - 实现标准 HTTP API 与 Web Dashboard — Status (2026-07-29 16:27): Completed — [任务记录](todo/implement-http-api-dashboard.md)
 - 按关注点整理本地 Git 提交 — Status (2026-07-29 10:58): Completed — [任务记录](todo/commit-local-changes.md)
 - 添加配置命令与交互式配置向导 — Status (2026-07-29 09:23): Completed — [任务记录](todo/add-config-command.md)

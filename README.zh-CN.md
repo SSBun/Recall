@@ -10,6 +10,7 @@
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Local First](https://img.shields.io/badge/data-local--first-5E6AD2)](#本地优先)
 [![OpenAPI](https://img.shields.io/badge/API-OpenAPI-6BA539?logo=openapiinitiative&logoColor=white)](./docs/GUIDE.zh-CN.md#http-api)
+[![MIT License](https://img.shields.io/badge/license-MIT-F5C518)](./LICENSE)
 
 [English](./README.md) · [简体中文](./README.zh-CN.md) · [English Guide](./docs/GUIDE.md) · [中文指南](./docs/GUIDE.zh-CN.md)
 
@@ -137,3 +138,7 @@ Recall 会把原始文件、提取内容、嵌入、元数据和 Chroma 数据�
 Recall 目前处于早期阶段，暂时从源码安装。数据模型和机器 envelope 已有版本号，但尚未发布公共软件包，也尚未承诺稳定 API。
 
 如果 Recall 对你有帮助，欢迎为仓库点 Star，并分享你希望个人知识系统下一步记住什么。
+
+## 许可证
+
+Recall 使用 [MIT License](./LICENSE) 开源。
