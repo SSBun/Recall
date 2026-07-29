@@ -13,6 +13,7 @@ import {
 
 import {
   completeWithModels,
+  createLoginSessionController,
   listAvailableModelReferences,
   parseModelReference,
 } from "../runtime/model-bridge.ts";
@@ -152,4 +153,48 @@ test("provider failures reject instead of returning an empty answer", async () =
     ),
     /No more faux responses queued/,
   );
+});
+
+test("login-session controller fails closed when method is unavailable", async () => {
+  const emitted: Array<Record<string, unknown>> = [];
+  const session = createLoginSessionController("device_code", (event) => emitted.push(event));
+
+  await assert.rejects(
+    session.interaction.prompt({
+      type: "select",
+      message: "Select a method",
+      options: [{ id: "browser", label: "Browser" }],
+    }),
+    /OAuth method not available/,
+  );
+  assert.deepEqual(emitted, []);
+});
+
+test("login-session controller streams device-code metadata and supports cancel", async () => {
+  const emitted: Array<Record<string, unknown>> = [];
+  const session = createLoginSessionController("browser", (event) => emitted.push(event));
+
+  session.interaction.notify({
+    type: "device_code",
+    verificationUri: "https://example.com/device",
+    userCode: "ABC-123",
+    intervalSeconds: 5,
+    expiresInSeconds: 900,
+  });
+  assert.deepEqual(emitted[0], {
+    type: "device_code",
+    verification_uri: "https://example.com/device",
+    user_code: "ABC-123",
+    interval_seconds: 5,
+    expires_in_seconds: 900,
+  });
+
+  const waiting = session.interaction.prompt({
+    type: "manual_code",
+    message: "Enter code",
+  });
+  session.handleLine(JSON.stringify({ type: "cancel" }));
+  await assert.rejects(waiting, /cancelled/);
+  assert.equal(session.controller.signal.aborted, true);
+  assert.deepEqual(emitted[1], { type: "waiting", prompt: "Enter code" });
 });

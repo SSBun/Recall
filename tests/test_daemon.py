@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import threading
@@ -6,6 +7,8 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from recall.daemon import DaemonClient, daemon_paths, serve
 
@@ -56,6 +59,7 @@ class DaemonTests(unittest.TestCase):
                     "runtime_root": root,
                     "idle_timeout": 0.2,
                     "app_factory": app_factory,
+                    "enable_http": False,
                 },
             )
             thread.start()
@@ -89,9 +93,7 @@ class DaemonTests(unittest.TestCase):
                 note = Path(directory) / "note.md"
                 note.write_text("daemon embedding reuse", encoding="utf-8")
                 with patch.dict(os.environ, {"RECALL_INDEX_CONCURRENCY": "7"}):
-                    indexed = first.request(
-                        ["index", str(note), "--no-tag"]
-                    )
+                    indexed = first.request(["index", str(note), "--no-tag"])
                 self.assertEqual(indexed["concurrency"], 7)
 
                 self.assertEqual(second.request(["list"]), {"documents": []})
@@ -105,6 +107,87 @@ class DaemonTests(unittest.TestCase):
                 first.stop()
                 second.stop()
 
+    def test_http_and_unix_share_one_app_and_status_api_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "runtime"
+            store = Path(directory) / "store"
+            apps = []
+
+            def app_factory(_store):
+                app = _App()
+                apps.append(app)
+                return app
+
+            with patch("recall.daemon.get_or_create_token", return_value="daemon-token"):
+                thread = threading.Thread(
+                    target=serve,
+                    kwargs={
+                        "store": store,
+                        "runtime_root": root,
+                        "idle_timeout": 1,
+                        "app_factory": app_factory,
+                    },
+                )
+                thread.start()
+                self._wait_for_socket(daemon_paths(store, root).socket)
+                client = DaemonClient(store, runtime_root=root)
+                status = client.status()
+                api_url = status["api_url"]
+
+                http_result = self._json_request(
+                    f"{api_url}/v1/documents",
+                    token="daemon-token",
+                )
+                unix_result = client.request(["list"])
+
+                self.assertEqual(http_result["data"], {"documents": []})
+                self.assertEqual(unix_result, {"documents": []})
+                self.assertEqual(len(apps), 1)
+                self.assertEqual(apps[0].list_calls, 2)
+                self.assertEqual(status["api_url"], api_url)
+
+                client.stop()
+                thread.join(timeout=2)
+                self.assertFalse(thread.is_alive())
+
+    def test_http_activity_extends_idle_timeout_and_http_stop_stops_both_transports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "runtime"
+            store = Path(directory) / "store"
+
+            with patch("recall.daemon.get_or_create_token", return_value="daemon-token"):
+                thread = threading.Thread(
+                    target=serve,
+                    kwargs={
+                        "store": store,
+                        "runtime_root": root,
+                        "idle_timeout": 0.5,
+                        "app_factory": lambda _store: _App(),
+                    },
+                )
+                thread.start()
+                self._wait_for_socket(daemon_paths(store, root).socket)
+                client = DaemonClient(store, runtime_root=root)
+                api_url = client.status()["api_url"]
+
+                time.sleep(0.2)
+                self._json_request(f"{api_url}/v1/health", token="daemon-token")
+                time.sleep(0.25)
+                self.assertTrue(thread.is_alive())
+
+                stop = self._json_request(
+                    f"{api_url}/v1/daemon/stop",
+                    token="daemon-token",
+                    method="POST",
+                )
+                self.assertEqual(stop["data"]["status"], "stopping")
+
+                thread.join(timeout=2)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(client.status()["status"], "stopped")
+                with self.assertRaises((HTTPError, URLError)):
+                    self._json_request(f"{api_url}/v1/health", token="daemon-token")
+
     def test_stop_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "runtime"
@@ -116,6 +199,7 @@ class DaemonTests(unittest.TestCase):
                     "runtime_root": root,
                     "idle_timeout": 10,
                     "app_factory": lambda _store: _App(),
+                    "enable_http": False,
                 },
             )
             thread.start()
@@ -132,3 +216,9 @@ class DaemonTests(unittest.TestCase):
         while not socket_path.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertTrue(socket_path.exists())
+
+    def _json_request(self, url: str, *, token: str, method: str = "GET") -> dict:
+        request = Request(url, method=method)
+        request.add_header("Authorization", f"Bearer {token}")
+        with urlopen(request, timeout=2) as response:
+            return json.loads(response.read().decode("utf-8"))

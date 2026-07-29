@@ -22,6 +22,7 @@ class CliHelpTests(unittest.TestCase):
             ["daemon"],
             ["daemon", "status"],
             ["daemon", "stop"],
+            ["dashboard"],
             ["config"],
             ["config", "list"],
             ["config", "set"],

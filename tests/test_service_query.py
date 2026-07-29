@@ -67,6 +67,8 @@ class RecallQueryTests(unittest.TestCase):
             self.assertFalse(answer["used_general_knowledge"])
             self.assertIn("只能依据", pi.ask_prompts[-1])
             self.assertEqual(answer["sources"][0]["reference"], 1)
+            self.assertEqual(answer["sources"][0]["content"], "Recall uses Chroma for vectors.")
+            self.assertEqual(answer["sources"][0]["metadata"]["summary"], "summary-v1")
 
             general = app.ask("Which database?", limit=5, allow_general_knowledge=True)
             self.assertTrue(general["used_general_knowledge"])
